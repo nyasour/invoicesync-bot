@@ -4,8 +4,7 @@ import io # Needed for PyPDF2
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field, ValidationError
-from mistralai.client import MistralClient
-from mistralai.models.chat_completion import ChatMessage
+from mistralai import Mistral # Corrected import path
 from PyPDF2 import PdfReader # Import PdfReader
 
 import config # Use loaded config
@@ -44,12 +43,27 @@ class OCRService(ABC):
 
 # --- Mistral OCR Implementation ---
 class MistralOCR(OCRService):
-    def __init__(self, api_key: Optional[str] = config.MISTRAL_API_KEY):
-        if not api_key:
+    def __init__(self, api_key: Optional[str] = None):
+        # Fetch API key from config if not provided explicitly
+        effective_api_key = api_key
+        if effective_api_key is None:
+            try:
+                # Instantiate settings to access the value
+                settings = config.Settings()
+                effective_api_key = settings.MISTRAL_API_KEY
+            except ValidationError:
+                 logger.critical("Configuration validation failed. Cannot determine Mistral API key.")
+                 raise ValueError("Configuration validation failed or Mistral API key missing.")
+            except AttributeError:
+                logger.critical("'MISTRAL_API_KEY' not found in configuration settings.")
+                raise ValueError("Mistral API key not found in configuration.")
+
+        if not effective_api_key:
             # Log critical error and raise exception if API key is missing
             logger.critical("Mistral API key is not configured. OCR service cannot be initialized.")
             raise ValueError("Mistral API key is not configured.")
-        self.client = MistralClient(api_key=api_key)
+            
+        self.client = Mistral(api_key=effective_api_key) # Use the determined key
         # Define the expected JSON structure for Mistral
         self.extraction_prompt_template = """
 Extract the following information from the provided invoice text:
@@ -141,9 +155,10 @@ JSON Output:
         # Step 3: Call Mistral API
         try:
             logger.info(f"Sending request to Mistral API for {filename}...")
-            chat_response = self.client.chat(
+            # Updated API call: Use chat.complete and pass messages as dicts
+            chat_response = self.client.chat.complete(
                 model="mistral-large-latest", # Confirm this is the best model choice
-                messages=[ChatMessage(role="user", content=prompt)],
+                messages=[{"role": "user", "content": prompt}], # Pass message as dict
                 temperature=0.1, # Lower temperature for more deterministic extraction
                 # response_format={"type": "json_object"} # Uncomment if supported and desired
             )

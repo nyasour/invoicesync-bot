@@ -8,7 +8,10 @@ google-cloud-secret-manager>=2.0.0
 python-dotenv>=1.0.0  # For local development
 PyPDF2>=3.0.0 # For PDF text extraction
 requests>=2.20.0 # Added for downloading files from Slack
-
-# Testing Dependencies
-pytest>=7.0.0
+openai
+slack_sdk
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
 pytest-mock>=3.5.0
+pytest>=7.0.0

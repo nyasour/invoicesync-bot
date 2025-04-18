@@ -99,6 +99,9 @@ class Settings:
         _allowed_cats_str = os.getenv("ALLOWED_CATEGORIES", "")
         self.ALLOWED_CATEGORIES = [cat.strip() for cat in _allowed_cats_str.split(',') if cat.strip()]
 
+        # --- Company Context --- 
+        self.COMPANY_CONTEXT = os.getenv("COMPANY_CONTEXT", "44pixels is a mobile app development studio focused on building utility apps. Key expense areas include software subscriptions, cloud services (AWS, GCP), and performance marketing (e.g., Facebook Ads, Google Ads).")
+
         # --- Storage Settings ---
         self.TEMP_STORAGE_BUCKET_NAME = os.getenv("TEMP_STORAGE_BUCKET_NAME", 
                                                  f"{self.GCP_PROJECT_ID}-invoices-temp" if self.GCP_PROJECT_ID else None)
@@ -126,11 +129,11 @@ class Settings:
             "XERO_CLIENT_ID": self.XERO_CLIENT_ID,
             "XERO_CLIENT_SECRET": self.XERO_CLIENT_SECRET,
         }
+        # COMPANY_CONTEXT is useful but not strictly required to run
+        # Add other strictly required ones here
         missing_configs = [k for k, v in REQUIRED_CONFIG.items() if not v]
         if missing_configs:
             logging.critical(f"Missing required configuration(s): {', '.join(missing_configs)}")
-            # Optionally raise an exception here to halt startup
-            # raise ValueError(f"Missing required configuration(s): {', '.join(missing_configs)}")
         
         logging.info(f"Configuration loaded. OCR: {self.OCR_SERVICE}, Categorization: {self.CATEGORIZATION_SERVICE}")
         if SECRET_MANAGER_ENABLED:
