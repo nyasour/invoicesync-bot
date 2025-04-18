@@ -1,0 +1,14 @@
+slack-bolt>=1.18.0
+mistralai>=0.1.0
+openai>=1.0.0
+xero-python>=1.2.0 # Corrected package name
+google-cloud-storage>=2.0.0
+pydantic>=2.0.0
+google-cloud-secret-manager>=2.0.0
+python-dotenv>=1.0.0  # For local development
+PyPDF2>=3.0.0 # For PDF text extraction
+requests>=2.20.0 # Added for downloading files from Slack
+
+# Testing Dependencies
+pytest>=7.0.0
+pytest-mock>=3.5.0
