@@ -1,9 +1,10 @@
 # services/ocr.py
 import logging
+import re
 import io # Needed for PyPDF2
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, AliasChoices
 from mistralai import Mistral # Corrected import path
 from PyPDF2 import PdfReader # Import PdfReader
 
@@ -17,13 +18,17 @@ class LineItem(BaseModel):
     description: Optional[str] = None
     amount: Optional[float] = None
     quantity: Optional[int] = None # Optional
+    unit_price: Optional[float] = None # Added unit_price
 
 class ExtractedInvoiceData(BaseModel):
-    vendor_name: Optional[str] = Field(None, alias="vendor")
-    invoice_number: Optional[str] = Field(None, alias="invoice_id") # Alias based on common OCR outputs
-    issue_date: Optional[str] = Field(None, alias="date") # Expecting YYYY-MM-DD format
-    total_amount: Optional[float] = Field(None, alias="total")
-    line_items: Optional[List[LineItem]] = [] # List of line items
+    vendor_name: str # Changed from Optional to required based on typical need
+    vendor_address: Optional[str] = None # Added vendor address
+    invoice_number: Optional[str] = Field(None, validation_alias=AliasChoices('invoice_number', 'invoice_id', 'invoice #')) 
+    issue_date: Optional[str] = None 
+    due_date: Optional[str] = None # Added due date
+    total_amount: float # Changed from Optional to required
+    currency: Optional[str] = None # Added currency
+    line_items: List[LineItem] # List of line items
 
 # --- OCR Service Interface ---
 class OCRService(ABC):
@@ -65,24 +70,55 @@ class MistralOCR(OCRService):
             
         self.client = Mistral(api_key=effective_api_key) # Use the determined key
         # Define the expected JSON structure for Mistral
-        self.extraction_prompt_template = """
-Extract the following information from the provided invoice text:
-- vendor_name: The name of the company issuing the invoice.
-- invoice_number: The unique identifier for the invoice.
-- issue_date: The date the invoice was issued (format YYYY-MM-DD). If multiple dates exist, prefer the main invoice date.
-- total_amount: The final total amount due, including tax if specified. Must be a number.
-- line_items: A list of items/services, including 'description' and 'amount' for each. If multiple items exist, list them all. If no line items are clearly listed, provide an empty list [].
-
-Format the output STRICTLY as a JSON object with these exact keys: "vendor_name", "invoice_number", "issue_date", "total_amount", "line_items".
-If a value is not found or cannot be determined, use null for that key (e.g., "invoice_number": null). Do not include explanations or apologies.
-
-Invoice Text:
-```
-{invoice_text}
-```
-
-JSON Output:
-"""
+        self.extraction_prompt_template = (
+            "Extract the key information from the following invoice text and provide it ONLY as a valid JSON object. "
+            "Ensure all monetary values are represented as numbers (float or int), not strings. \n"
+            "Use the EXACT JSON key names specified below (e.g., 'vendor_name', 'invoice_number', 'issue_date').\n"
+            "Required fields:\n"
+            "- vendor_name (string, required): The name of the company issuing the invoice.\n"
+            "- vendor_address (string, optional): The full address of the vendor.\n"
+            "- invoice_number (string, optional): The unique identifier for the invoice.\n"
+            "- issue_date (string, optional): The date the invoice was issued (YYYY-MM-DD format preferred).\n"
+            "- due_date (string, optional): The date the invoice payment is due (YYYY-MM-DD format preferred).\n"
+            "- total_amount (float, required): The final total amount due on the invoice.\n"
+            "- currency (string, optional): The currency code (e.g., USD, GBP, EUR).\n"
+            "- line_items (array of objects, required): A list of items or services billed. Each object MUST contain:\n"
+            "    - description (string, required): Description of the line item.\n"
+            "    - quantity (float, optional): The quantity of the item.\n"
+            "    - unit_price (float, optional): The price per unit of the item.\n"
+            "    - amount (float, required): The total amount for the line item (quantity * unit_price).\n\n"
+            "Example JSON structure (use these keys):\n"
+            "```json\n"
+            "{{\n"
+            "  \"vendor_name\": \"Example Corp\",\n"
+            "  \"vendor_address\": \"123 Example St, Example City, EX 12345\",\n"
+            "  \"invoice_number\": \"INV-123\",\n"
+            "  \"issue_date\": \"2024-01-15\",\n"
+            "  \"due_date\": \"2024-01-30\",\n"
+            "  \"total_amount\": 150.75,\n"
+            "  \"currency\": \"USD\",\n"
+            "  \"line_items\": [\n"
+            "    {{\n"
+            "      \"description\": \"Product A\",\n"
+            "      \"quantity\": 2,\n"
+            "      \"unit_price\": 50.00,\n"
+            "      \"amount\": 100.00\n"
+            "    }},\n"
+            "    {{\n"
+            "      \"description\": \"Service B\",\n"
+            "      \"quantity\": null,\n"
+            "      \"unit_price\": null,\n"
+            "      \"amount\": 50.75\n"
+            "    }}\n"
+            "  ]\n"
+            "}}\n"
+            "```\n\n"
+            "Here is the invoice text:\n"
+            "---------------------\n"
+            "{invoice_text}\n"
+            "---------------------\n"
+            "JSON Output Only (using specified keys):"
+        )
 
     def _extract_text_from_pdf(self, pdf_content: bytes, filename: str) -> Optional[str]:
         """Extracts text from PDF content using PyPDF2."""
@@ -119,12 +155,17 @@ JSON Output:
                 response_content = response_content[:-3]
             response_content = response_content.strip()
 
+            # --- Add this line ---
+            # Remove ASCII control characters (0-31) except \n, \r, \t
+            response_content = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', response_content)
+            # --------------------
+
             # Handle potential variations if model doesn't strictly follow JSON format
             # Basic check if it looks like JSON
             if not response_content.startswith("{") or not response_content.endswith("}"):
-                 logger.warning(f"Mistral response for {filename} does not appear to be valid JSON: {response_content[:100]}...")
-                 # Attempt parsing anyway, might fail
-            
+                logger.warning(f"Mistral response for {filename} does not appear to be valid JSON: {response_content[:100]}...")
+                # Attempt parsing anyway, might fail
+
             data = ExtractedInvoiceData.model_validate_json(response_content)
             logger.info(f"Successfully parsed Mistral OCR response for {filename}: {data.model_dump(exclude_none=True)}")
             return data
@@ -160,7 +201,7 @@ JSON Output:
                 model="mistral-large-latest", # Confirm this is the best model choice
                 messages=[{"role": "user", "content": prompt}], # Pass message as dict
                 temperature=0.1, # Lower temperature for more deterministic extraction
-                # response_format={"type": "json_object"} # Uncomment if supported and desired
+                response_format={"type": "json_object"} # Added to enforce JSON output
             )
 
             if chat_response.choices and chat_response.choices[0].message:

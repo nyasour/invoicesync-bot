@@ -29,17 +29,20 @@ class InvoiceCategorizer:
 
     def __init__(self):
         """Initializes the categorizer based on configuration."""
-        self.provider = settings.CATEGORIZATION_PROVIDER
-        self.client = None
-        self.allowed_categories = settings.ALLOWED_CATEGORIES
-        self.company_context = settings.COMPANY_CONTEXT
+        self.logger = logging.getLogger(__name__)
+        self.settings = settings
+        self.provider = self.settings.CATEGORIZATION_SERVICE
+        self.allowed_categories = self.settings.ALLOWED_CATEGORIES
+        self.company_context = self.settings.COMPANY_CONTEXT
+        self.client = None # Initialize client to None
 
-        if self.provider == "openai":
-            if not settings.OPENAI_API_KEY:
+        # Check for the correct provider name from settings
+        if not self.provider or self.provider == "openaicategorizer": 
+            if not self.settings.OPENAI_API_KEY:
                 logger.error("OpenAI API key is missing. OpenAI categorizer disabled.")
             else:
                 try:
-                    self.client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+                    self.client = openai.OpenAI(api_key=self.settings.OPENAI_API_KEY)
                     logger.info("OpenAI client initialized for categorization.")
                 except Exception as e:
                     logger.error(f"Failed to initialize OpenAI client: {e}")
@@ -55,10 +58,23 @@ class InvoiceCategorizer:
                           f"Invoice Number: {invoice_data.invoice_number}\n" \
                           f"Issue Date: {invoice_data.issue_date}\n" \
                           f"Total Amount: {invoice_data.total_amount}\n"
+        
+        # Add line item details, handling missing optional fields
+        invoice_details += "Line Items:\n"
         if invoice_data.line_items:
-            invoice_details += "Line Items:\n"
             for item in invoice_data.line_items:
-                invoice_details += f"  - Description: {item.description}, Quantity: {item.quantity}, Unit Price: {item.unit_price}, Amount: {item.amount}\n"
+                item_desc = f"  - Description: {item.description}"
+                if item.quantity is not None:
+                    item_desc += f", Quantity: {item.quantity}"
+                # Safely access unit_price - check existence/None before using
+                unit_price = getattr(item, 'unit_price', None)
+                if unit_price is not None:
+                    item_desc += f", Unit Price: {unit_price}"
+                if item.amount is not None:
+                    item_desc += f", Amount: {item.amount}"
+                invoice_details += item_desc + "\n"
+        else:
+            invoice_details += "  (No line items extracted)\n"
 
         allowed_categories_str = ", ".join(self.allowed_categories)
 
@@ -92,7 +108,8 @@ Instructions:
         """Determines the expense category for the given invoice data using the configured provider."""
         logger.info(f"Starting categorization for vendor: {invoice_data.vendor_name} using provider: {self.provider}")
 
-        if self.provider != "openai" or not self.client:
+        # Check for the correct provider name and ensure client is initialized
+        if self.provider != "openaicategorizer" or not self.client:
             logger.warning(f"Categorization skipped: Provider is '{self.provider}' or client not initialized.")
             return CategorizationResult(status='error', notes=f"Categorization provider '{self.provider}' not supported or not initialized.")
 
