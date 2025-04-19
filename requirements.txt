@@ -1,5 +1,5 @@
 slack-bolt>=1.18.0
-mistralai>=0.1.0
+mistralai>=0.2.0
 openai>=1.0.0
 xero-python>=1.2.0 # Corrected package name
 google-cloud-storage>=2.0.0
@@ -10,8 +10,13 @@ PyPDF2>=3.0.0 # For PDF text extraction
 requests>=2.20.0 # Added for downloading files from Slack
 openai
 slack_sdk
+slack_bolt
+aiohttp
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
 pytest-mock>=3.5.0
 pytest>=7.0.0
+fastapi
+uvicorn[standard]
+python-multipart

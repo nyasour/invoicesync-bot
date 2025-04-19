@@ -96,8 +96,20 @@ class Settings:
         self.CATEGORIZATION_SERVICE = os.getenv("CATEGORIZATION_SERVICE", "openai").lower()
 
         # --- Allowed Categories ---
-        _allowed_cats_str = os.getenv("ALLOWED_CATEGORIES", "")
-        self.ALLOWED_CATEGORIES = [cat.strip() for cat in _allowed_cats_str.split(',') if cat.strip()]
+        _allowed_cats_str = os.getenv("ALLOWED_CATEGORIES", "[]") # Default to empty JSON list string
+        try:
+            self.ALLOWED_CATEGORIES = json.loads(_allowed_cats_str)
+            if not isinstance(self.ALLOWED_CATEGORIES, list):
+                logging.warning(f"ALLOWED_CATEGORIES was not a valid JSON list. Got: {_allowed_cats_str}. Using empty list.")
+                self.ALLOWED_CATEGORIES = []
+            # Ensure all items are strings
+            self.ALLOWED_CATEGORIES = [str(item) for item in self.ALLOWED_CATEGORIES]
+        except json.JSONDecodeError:
+            logging.warning(f"Failed to parse ALLOWED_CATEGORIES JSON: {_allowed_cats_str}. Attempting comma-separated fallback.")
+            # Fallback for simple comma-separated strings (optional, but might be useful)
+            self.ALLOWED_CATEGORIES = [cat.strip() for cat in _allowed_cats_str.split(',') if cat.strip()]
+            if not self.ALLOWED_CATEGORIES:
+                 logging.warning(f"Could not parse ALLOWED_CATEGORIES as JSON or comma-separated. Using empty list.")
 
         # --- Company Context --- 
         self.COMPANY_CONTEXT = os.getenv("COMPANY_CONTEXT", "44pixels is a mobile app development studio focused on building utility apps. Key expense areas include software subscriptions, cloud services (AWS, GCP), and performance marketing (e.g., Facebook Ads, Google Ads).")
@@ -128,10 +140,24 @@ class Settings:
             "OPENAI_API_KEY": self.OPENAI_API_KEY,
             "XERO_CLIENT_ID": self.XERO_CLIENT_ID,
             "XERO_CLIENT_SECRET": self.XERO_CLIENT_SECRET,
+            "ALLOWED_CATEGORIES": self.ALLOWED_CATEGORIES,
+            "COMPANY_CONTEXT": self.COMPANY_CONTEXT
         }
         # COMPANY_CONTEXT is useful but not strictly required to run
         # Add other strictly required ones here
-        missing_configs = [k for k, v in REQUIRED_CONFIG.items() if not v]
+        if not SECRET_MANAGER_ENABLED:
+            REQUIRED_CONFIG = {
+                "SLACK_BOT_TOKEN",
+                "SLACK_SIGNING_SECRET",
+                "MISTRAL_API_KEY",
+                "OPENAI_API_KEY",
+                "ALLOWED_CATEGORIES",
+                "COMPANY_CONTEXT"
+                # Add XERO_CLIENT_ID and XERO_CLIENT_SECRET here if/when needed
+            }
+            missing_configs = {key for key in REQUIRED_CONFIG if not getattr(self, key)}
+        else:
+            missing_configs = [k for k, v in REQUIRED_CONFIG.items() if not v]
         if missing_configs:
             logging.critical(f"Missing required configuration(s): {', '.join(missing_configs)}")
         
