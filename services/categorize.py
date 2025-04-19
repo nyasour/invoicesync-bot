@@ -5,6 +5,8 @@ from typing import Optional, Dict, Any
 from pydantic import BaseModel, ValidationError
 
 from openai import OpenAI, OpenAIError # Import OpenAI client and errors
+from config import settings # Ensure settings is imported
+import openai # Ensure openai is imported
 
 # Import the OCR data model and config
 from services.ocr import ExtractedInvoiceData
@@ -34,11 +36,37 @@ class CategorizationService(ABC):
 
 # --- OpenAI Categorization Implementation ---
 class OpenAICategorizer(CategorizationService):
-    def __init__(self, api_key: Optional[str] = config.OPENAI_API_KEY):
+    """Categorizes invoices using the OpenAI API."""
+
+    def __init__(self, api_key: Optional[str] = None): # Default to None
+        """
+        Initializes the OpenAICategorizer.
+
+        Args:
+            api_key: The OpenAI API key. If None, it's fetched from settings.
+        """
+        self.logger = logging.getLogger(__name__)
+
+        # If no API key is passed in, try to get it from settings
+        if api_key is None:
+            api_key = settings.OPENAI_API_KEY
+            self.logger.info("Attempting to use OpenAI API key from settings.")
+
+        # Raise error if still no API key
         if not api_key:
-            logger.critical("OpenAI API key is not configured. Categorization service cannot be initialized.")
-            raise ValueError("OpenAI API key is not configured.")
-        self.client = OpenAI(api_key=api_key)
+            self.logger.error("OpenAI API key is required but not provided or found in settings.")
+            raise ValueError("OpenAI API key is required but not provided or found in settings.")
+
+        self.api_key = api_key
+        try:
+            # Initialize the OpenAI client with the resolved API key
+            self.client = openai.OpenAI(api_key=self.api_key)
+            self.logger.info("OpenAI client initialized successfully.")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize OpenAI client: {e}")
+            self.client = None # Ensure client is None if initialization fails
+            raise ConnectionError(f"Failed to initialize OpenAI client: {e}") from e
+
         self.model = "gpt-4-turbo-preview" # Or "gpt-4" - check availability/cost
         # Define allowed categories based on config/requirements
         self.allowed_categories = list(config.XERO_ACCOUNT_CODES.keys())

@@ -6,7 +6,6 @@ from typing import Optional, Dict, Any
 # Xero API library and OAuth2 handling
 from xero_python.accounting import AccountingApi, Contact, Account, Bill, LineItem as XeroLineItem, CurrencyCode
 from xero_python.api_client import ApiClient, Configuration
-from xero_python.api_client.oauth2 import OAuth2Credentials
 from xero_python.exceptions import AccountingBadRequestException, ApiException
 
 # Import project config and data models

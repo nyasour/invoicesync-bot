@@ -24,7 +24,10 @@ MISTRAL_API_KEY_SECRET_NAME = "MISTRAL_API_KEY"
 OPENAI_API_KEY_SECRET_NAME = "OPENAI_API_KEY"
 XERO_CLIENT_ID_SECRET_NAME = "XERO_CLIENT_ID"
 XERO_CLIENT_SECRET_SECRET_NAME = "XERO_CLIENT_SECRET"
+XERO_REDIRECT_URI_SECRET_NAME = "XERO_REDIRECT_URI"
 XERO_REFRESH_TOKEN_SECRET_NAME = "XERO_REFRESH_TOKEN"
+XERO_TENANT_ID_SECRET_NAME = "XERO_TENANT_ID"
+XERO_ACCOUNT_CODE_MAP_SECRET_NAME = "XERO_ACCOUNT_CODE_MAP"
 
 # --- Helper Function to Get Secrets (Keep at module level) ---
 _secret_cache = {} # Simple in-memory cache for secrets
@@ -86,17 +89,22 @@ class Settings:
         # --- API Keys ---
         self.MISTRAL_API_KEY = get_secret(MISTRAL_API_KEY_SECRET_NAME)
         self.OPENAI_API_KEY = get_secret(OPENAI_API_KEY_SECRET_NAME)
+        # --- Xero Credentials (Initial OAuth needs ID, Secret, Redirect, Scopes) ---
         self.XERO_CLIENT_ID = get_secret(XERO_CLIENT_ID_SECRET_NAME)
         self.XERO_CLIENT_SECRET = get_secret(XERO_CLIENT_SECRET_SECRET_NAME)
+        # Redirect URI and Scopes might come from env var directly or secrets
+        self.XERO_REDIRECT_URI = get_secret(XERO_REDIRECT_URI_SECRET_NAME) or os.getenv("XERO_REDIRECT_URI")
+        self.XERO_SCOPES = os.getenv("XERO_SCOPES", "offline_access accounting.transactions accounting.contacts.read accounting.settings.read openid profile email")
+        # Refresh token and Tenant ID are obtained *after* initial auth, load if available
         self.XERO_REFRESH_TOKEN = get_secret(XERO_REFRESH_TOKEN_SECRET_NAME)
-        self.XERO_TENANT_ID = os.getenv("XERO_TENANT_ID")
+        self.XERO_TENANT_ID = get_secret(XERO_TENANT_ID_SECRET_NAME)
 
-        # --- Service Selection ---
+        # --- Service Selection (Add back) ---
         self.OCR_SERVICE = os.getenv("OCR_SERVICE", "mistral").lower()
         self.CATEGORIZATION_SERVICE = os.getenv("CATEGORIZATION_SERVICE", "openai").lower()
 
-        # --- Allowed Categories ---
-        _allowed_cats_str = os.getenv("ALLOWED_CATEGORIES", "[]") # Default to empty JSON list string
+        # --- Categorization Settings ---
+        _allowed_cats_str = os.getenv("ALLOWED_CATEGORIES", '["Software & Subscriptions", "Office Supplies", "Travel", "Marketing & Advertising", "Meals & Entertainment", "Utilities", "Professional Services"]')
         try:
             self.ALLOWED_CATEGORIES = json.loads(_allowed_cats_str)
             if not isinstance(self.ALLOWED_CATEGORIES, list):
@@ -118,16 +126,16 @@ class Settings:
         self.TEMP_STORAGE_BUCKET_NAME = os.getenv("TEMP_STORAGE_BUCKET_NAME", 
                                                  f"{self.GCP_PROJECT_ID}-invoices-temp" if self.GCP_PROJECT_ID else None)
 
-        # --- Xero Settings ---
-        _xero_codes_json = os.getenv("XERO_ACCOUNT_CODES", "{}")
+        # --- Xero Account Code Map ---
+        _xero_codes_json = get_secret(XERO_ACCOUNT_CODE_MAP_SECRET_NAME) or os.getenv("XERO_ACCOUNT_CODE_MAP", "{}")
         try:
-            self.XERO_ACCOUNT_CODES = json.loads(_xero_codes_json)
-            if not isinstance(self.XERO_ACCOUNT_CODES, dict):
-                logging.warning(f"XERO_ACCOUNT_CODES was not a valid JSON dictionary. Got: {_xero_codes_json}. Using empty map.")
-                self.XERO_ACCOUNT_CODES = {}
+            self.XERO_ACCOUNT_CODE_MAP = json.loads(_xero_codes_json)
+            if not isinstance(self.XERO_ACCOUNT_CODE_MAP, dict):
+                logging.warning(f"XERO_ACCOUNT_CODE_MAP was not a valid JSON dictionary. Got: {_xero_codes_json}. Using empty map.")
+                self.XERO_ACCOUNT_CODE_MAP = {}
         except json.JSONDecodeError:
-            logging.warning(f"Failed to parse XERO_ACCOUNT_CODES JSON: {_xero_codes_json}. Using empty map.")
-            self.XERO_ACCOUNT_CODES = {}
+            logging.warning(f"Failed to parse XERO_ACCOUNT_CODE_MAP JSON: {_xero_codes_json}. Using empty map.")
+            self.XERO_ACCOUNT_CODE_MAP = {}
             
         # --- Validation ---
         REQUIRED_CONFIG = {
@@ -138,10 +146,13 @@ class Settings:
             "TEMP_STORAGE_BUCKET_NAME": self.TEMP_STORAGE_BUCKET_NAME,
             "MISTRAL_API_KEY": self.MISTRAL_API_KEY,
             "OPENAI_API_KEY": self.OPENAI_API_KEY,
-            "XERO_CLIENT_ID": self.XERO_CLIENT_ID,
-            "XERO_CLIENT_SECRET": self.XERO_CLIENT_SECRET,
+            "XERO_CLIENT_ID": self.XERO_CLIENT_ID, # Needed for OAuth flow
+            "XERO_CLIENT_SECRET": self.XERO_CLIENT_SECRET, # Needed for OAuth flow
+            "XERO_REDIRECT_URI": self.XERO_REDIRECT_URI, # Needed for OAuth flow
             "ALLOWED_CATEGORIES": self.ALLOWED_CATEGORIES,
             "COMPANY_CONTEXT": self.COMPANY_CONTEXT
+            # XERO_REFRESH_TOKEN and XERO_TENANT_ID are not required initially
+            # XERO_ACCOUNT_CODE_MAP is useful but might be empty initially
         }
         # COMPANY_CONTEXT is useful but not strictly required to run
         # Add other strictly required ones here
@@ -152,8 +163,10 @@ class Settings:
                 "MISTRAL_API_KEY",
                 "OPENAI_API_KEY",
                 "ALLOWED_CATEGORIES",
-                "COMPANY_CONTEXT"
-                # Add XERO_CLIENT_ID and XERO_CLIENT_SECRET here if/when needed
+                "COMPANY_CONTEXT",
+                "XERO_CLIENT_ID", # Needed for OAuth flow
+                "XERO_CLIENT_SECRET", # Needed for OAuth flow
+                "XERO_REDIRECT_URI" # Needed for OAuth flow
             }
             missing_configs = {key for key in REQUIRED_CONFIG if not getattr(self, key)}
         else:
